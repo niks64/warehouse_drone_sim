@@ -1,0 +1,33 @@
+simulation:
+  gui: true
+  timestep: 0.004  # 240 Hz
+  gravity: -9.81
+
+warehouse:
+  dimensions:
+    length: 20.0  # meters
+    width: 20.0   # meters
+    height: 5.0   # meters
+  num_obstacles: 10
+  shelf_rows: 4
+  shelf_columns: 5
+
+drones:
+  num_drones: 3
+  start_positions:
+    - [0, 0, 1]
+    - [2, 2, 1]
+    - [-2, -2, 1]
+  max_velocity: 2.0
+  max_acceleration: 1.0
+  sensor_range: 5.0
+
+navigation:
+  planning_algorithm: "rrt"  # Options: "rrt", "a_star"
+  grid_resolution: 0.5
+  safety_margin: 0.3
+
+inventory:
+  num_items: 50
+  qr_code_size: 0.2
+  scan_distance: 1.0
