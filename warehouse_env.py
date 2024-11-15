@@ -8,20 +8,24 @@ class WarehouseAviary(BaseAviary):
     """Custom warehouse environment for drone fleet inventory management."""
     
     def __init__(self,
-                 drone_model: DroneModel=DroneModel.CF2X,
-                 num_drones: int=1,
-                 neighbourhood_radius: float=np.inf,
-                 initial_xyzs=None,
-                 initial_rpys=None,
-                 physics: Physics=Physics.PYB,
-                 pyb_freq: int = 240,
-                 ctrl_freq: int = 240,
-                 gui=False,
-                 record=False,
-                 obstacles=True,
-                 user_debug_gui=True,
-                 output_folder='results'
-                 ):
+                drone_model: DroneModel=DroneModel.CF2X,
+                num_drones: int=1,
+                neighbourhood_radius: float=np.inf,
+                initial_xyzs=None,
+                initial_rpys=None,
+                physics: Physics=Physics.PYB,
+                pyb_freq: int = 240,
+                ctrl_freq: int = 240,
+                gui=False,
+                record=False,
+                obstacles=True,
+                user_debug_gui=True,
+                output_folder='results',
+                warehouse_dims=(10.0, 10.0, 3.0),
+                shelf_dims=(0.5, 2.0, 2.0),
+                aisle_x_width=1.5,
+                aisle_y_width=1.0
+        ):
         """Initialize warehouse environment.
         
         Args:
@@ -41,36 +45,55 @@ class WarehouseAviary(BaseAviary):
                         user_debug_gui=user_debug_gui,
                         output_folder=output_folder
                         )
-        # Warehouse dimensions
-        self.WAREHOUSE_WIDTH = 10.0
-        self.WAREHOUSE_LENGTH = 10.0
-        self.WAREHOUSE_HEIGHT = 3.0
-        self.SHELF_WIDTH = 0.5
-        self.AISLE_WIDTH = 1.5
+        
+        self.WAREHOUSE_WIDTH = warehouse_dims[0]
+        self.WAREHOUSE_LENGTH = warehouse_dims[1]
+        self.WAREHOUSE_HEIGHT = warehouse_dims[2]
+        
+        self.SHELF_WIDTH = shelf_dims[0]
+        self.SHELF_LENGTH = shelf_dims[1]
+        self.SHELF_HEIGHT = shelf_dims[2]
+
+        self.AISLE_X_WIDTH = aisle_x_width
+        self.AISLE_Y_WIDTH = aisle_y_width
         
         # Create warehouse structure
-        self._create_warehouse()
+        self._create_warehouse(shelf_dims)
 
-    def _create_warehouse(self):
+    def _create_warehouse(self, shelf_dims):
         """Create warehouse structure with shelves and aisles."""
+        
         # Floor
-        p.loadURDF("plane.urdf", [0, 0, 0], p.getQuaternionFromEuler([0, 0, 0]),
-                physicsClientId=self.CLIENT)
+        p.loadURDF(
+            "plane.urdf", [0, 0, 0], p.getQuaternionFromEuler([0, 0, 0]),
+            physicsClientId=self.CLIENT
+        )
         
         # Create walls
-        self._create_box([0, self.WAREHOUSE_LENGTH/2, self.WAREHOUSE_HEIGHT/2],  # Back wall
-                        [self.WAREHOUSE_WIDTH, 0.1, self.WAREHOUSE_HEIGHT])
-        self._create_box([0, -self.WAREHOUSE_LENGTH/2, self.WAREHOUSE_HEIGHT/2], # Front wall
-                        [self.WAREHOUSE_WIDTH, 0.1, self.WAREHOUSE_HEIGHT])
-        self._create_box([self.WAREHOUSE_WIDTH/2, 0, self.WAREHOUSE_HEIGHT/2],   # Right wall
-                        [0.1, self.WAREHOUSE_LENGTH, self.WAREHOUSE_HEIGHT])
-        self._create_box([-self.WAREHOUSE_WIDTH/2, 0, self.WAREHOUSE_HEIGHT/2],  # Left wall
-                        [0.1, self.WAREHOUSE_LENGTH, self.WAREHOUSE_HEIGHT])
+        self._create_box(
+            [0, self.WAREHOUSE_LENGTH/2, self.WAREHOUSE_HEIGHT/2],  # Back wall
+            [self.WAREHOUSE_WIDTH, 0.1, self.WAREHOUSE_HEIGHT]
+        )
+
+        self._create_box(
+            [0, -self.WAREHOUSE_LENGTH/2, self.WAREHOUSE_HEIGHT/2], # Front wall
+            [self.WAREHOUSE_WIDTH, 0.1, self.WAREHOUSE_HEIGHT]
+        )
+
+        self._create_box(
+            [self.WAREHOUSE_WIDTH/2, 0, self.WAREHOUSE_HEIGHT/2],   # Right wall
+            [0.1, self.WAREHOUSE_LENGTH, self.WAREHOUSE_HEIGHT]    
+        )
+
+        self._create_box(
+            [-self.WAREHOUSE_WIDTH/2, 0, self.WAREHOUSE_HEIGHT/2],  # Left wall
+            [0.1, self.WAREHOUSE_LENGTH, self.WAREHOUSE_HEIGHT]
+        )
         
         # Create shelves and packages
         shelf_positions = self._generate_shelf_positions()
         for pos in shelf_positions:
-            self._create_box(pos, [self.SHELF_WIDTH, 2.0, 2.0])
+            self._create_box(pos, shelf_dims)
             # Add packages on each shelf
             self._add_packages_to_shelf(pos)
 
@@ -144,12 +167,22 @@ class WarehouseAviary(BaseAviary):
     def _generate_shelf_positions(self):
         """Generate positions for warehouse shelves in a grid pattern."""
         positions = []
-        x_start = -self.WAREHOUSE_WIDTH/2 + 2.0
-        y_start = -self.WAREHOUSE_LENGTH/2 + 2.0
+        x_start = -self.WAREHOUSE_WIDTH/2 + self.AISLE_X_WIDTH
+        y_start = -self.WAREHOUSE_LENGTH/2 + self.AISLE_Y_WIDTH
         
-        for x in np.arange(x_start, self.WAREHOUSE_WIDTH/2-1, self.AISLE_WIDTH + self.SHELF_WIDTH):
-            for y in np.arange(y_start, self.WAREHOUSE_LENGTH/2-1, 3.0):
-                positions.append([x, y, 1.0])
+        for x in np.arange(
+            x_start, self.WAREHOUSE_WIDTH/2 - self.AISLE_X_WIDTH - self.SHELF_WIDTH, 
+            self.AISLE_X_WIDTH + self.SHELF_WIDTH
+        ):
+            for y in np.arange(
+                y_start, self.WAREHOUSE_LENGTH/2,
+                self.AISLE_Y_WIDTH + self.SHELF_LENGTH
+            ):
+                positions.append([
+                    x + self.SHELF_WIDTH/2, 
+                    y + self.SHELF_LENGTH/2, 
+                    self.SHELF_HEIGHT/2
+                ])
         
         return positions
 

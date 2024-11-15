@@ -6,25 +6,42 @@ from gym_pybullet_drones.utils.enums import DroneModel, Physics
 from gym_pybullet_drones.utils.utils import sync
 from gym_pybullet_drones.control.DSLPIDControl import DSLPIDControl
 
+INITIAL_XYZS = np.array([[-4, -6, 1.0]]) # Start in bottom left corner
+INITIAL_RPYS = np.array([[0, 0, 0]])
+
+WAREHOUSE_DIMS = (10.0, 14.0, 3.0)
+SHELF_DIMS = (0.5, 2.0, 2.0)
+
+AISLE_X_WIDTH = 2.0
+AISLE_Y_WIDTH = 2.0
+
+INSPECTION_HEIGHT = 1.0
+SAFETY_MARGIN = 0.75
+
 # Initialize environment
 env = WarehouseAviary(
     drone_model=DroneModel.CF2X,
     num_drones=1,
-    initial_xyzs=np.array([[0, 0, 1.0]]),
-    initial_rpys=np.array([[0, 0, 0]]),
+    initial_xyzs=INITIAL_XYZS,
+    initial_rpys=INITIAL_RPYS,
     physics=Physics.PYB,
     pyb_freq=240,
     ctrl_freq=240,
     gui=True,
+    warehouse_dims=WAREHOUSE_DIMS,
+    shelf_dims=SHELF_DIMS,
+    aisle_x_width=AISLE_X_WIDTH,
+    aisle_y_width=AISLE_Y_WIDTH
 )
 
 # Initialize path planner with warehouse dimensions
 path_planner = WarehousePathPlanner(
-    warehouse_dims=(10.0, 10.0, 3.0),
-    shelf_dims=(0.5, 2.0, 2.0),
-    aisle_width=1.5,
-    inspection_height=1.0,
-    safety_margin=0.3
+    warehouse_dims=WAREHOUSE_DIMS,
+    shelf_dims=SHELF_DIMS,
+    aisle_x_width=AISLE_X_WIDTH,
+    aisle_y_width=AISLE_Y_WIDTH,
+    inspection_height=INSPECTION_HEIGHT,
+    safety_margin=SAFETY_MARGIN
 )
 
 # Initialize PID controller
@@ -39,11 +56,13 @@ time_at_waypoint = 0   # Time spent at current waypoint
 min_time_at_waypoint = 2 * env.PYB_FREQ  # Minimum steps to spend at each waypoint
 
 # Get full inspection path
-inspection_path = path_planner.get_full_inspection_path()
+inspection_path = path_planner._generate_inspection_points()
 
 print(f"Total inspection waypoints: {len(inspection_path)}")
 for i, wp in enumerate(inspection_path):
     print(f"Waypoint {i}: {wp}")
+
+# exit()
 
 START = time.time()
 

@@ -5,11 +5,12 @@ class WarehousePathPlanner:
     """Path planner for warehouse drone navigation"""
     
     def __init__(self, 
-                 warehouse_dims: Tuple[float, float, float],
-                 shelf_dims: Tuple[float, float, float],
-                 aisle_width: float,
-                 inspection_height: float = 1.0,
-                 safety_margin: float = 0.3
+                warehouse_dims: Tuple[float, float, float],
+                shelf_dims: Tuple[float, float, float],
+                aisle_x_width: float = 1.5,
+                aisle_y_width: float = 1.0,
+                inspection_height: float = 1.0,
+                safety_margin: float = 0.3
                 ):
         """Initialize warehouse path planner
         
@@ -21,78 +22,68 @@ class WarehousePathPlanner:
             safety_margin: Minimum distance to keep from obstacles
         """
         self.warehouse_dims = warehouse_dims
-        self.shelf_dims = shelf_dims  
-        self.aisle_width = aisle_width
+        self.shelf_dims = shelf_dims
+
+        self.aisle_x_width = aisle_x_width
+        self.aisle_y_width = aisle_y_width
+
         self.inspection_height = inspection_height
         self.safety_margin = safety_margin
         
         # Calculate grid of shelf positions
         self.shelf_positions = self._generate_shelf_grid()
-        
-        # Generate inspection waypoints
-        self.inspection_points = self._generate_inspection_points()
 
     def _generate_shelf_grid(self) -> List[Tuple[float, float, float]]:
-        """Generate grid of shelf positions based on warehouse layout"""
-        positions = []
-        x_start = -self.warehouse_dims[0]/2 + 2.0
-        y_start = -self.warehouse_dims[1]/2 + 2.0
+        """Generate grid of shelf boxes with their dimensions"""
+        shelf_boxes = []
+        x_start = -self.warehouse_dims[0]/2 + self.aisle_x_width
+        y_start = -self.warehouse_dims[1]/2 + self.aisle_y_width
         
-        for x in np.arange(x_start, self.warehouse_dims[0]/2-1, 
-                          self.aisle_width + self.shelf_dims[0]):
-            for y in np.arange(y_start, self.warehouse_dims[1]/2-1, 3.0):
-                positions.append((x, y, self.shelf_dims[2]/2))
-                
-        return positions
+        for x in np.arange(
+            x_start, self.warehouse_dims[0]/2 - self.aisle_x_width - self.shelf_dims[0], 
+            self.aisle_x_width + self.shelf_dims[0]
+        ):
+            for y in np.arange(
+                y_start, self.warehouse_dims[1]/2, 
+                self.aisle_y_width + self.shelf_dims[1]    
+            ):
+                # Store shelf as (position, dimensions)
+                shelf_boxes.append({
+                    'position': (x, y, 0),
+                    'dimensions': self.shelf_dims
+                })
+        
+        return shelf_boxes
 
     def _generate_inspection_points(self) -> List[Tuple[float, float, float]]:
-        """Generate waypoints for inspecting all shelves
+        """Generate inspection points in a snake pattern through the aisles"""
+        points = []
+       
+        aisle_x_coords = sorted(list(set([shelf['position'][0] for shelf in self.shelf_positions])))
+        min_y = min([shelf['position'][1] for shelf in self.shelf_positions])
+        max_y = max([shelf['position'][1] + shelf['dimensions'][1] for shelf in self.shelf_positions])
         
-        Creates a path that:
-        1. Maintains safe distance from obstacles
-        2. Positions drone at proper height and orientation for scanning
-        3. Covers all shelves systematically
-        4. Includes smooth transitions between inspection points
-        """
-        inspection_points = []
-        
-        # For each shelf, generate multiple inspection points
-        for shelf_x, shelf_y, _ in self.shelf_positions:
-            # Front viewing position
-            front_point = (
-                shelf_x + self.shelf_dims[0]/2 + self.safety_margin,
-                shelf_y,
-                self.inspection_height
-            )
-            inspection_points.append(front_point)
+        moving_up = True
+        for i, x in enumerate(aisle_x_coords):
+            aisle_center = x - self.safety_margin
             
-            # Add points to inspect along the shelf length
-            num_side_points = 3  # Number of inspection points along each shelf
-            for i in range(num_side_points):
-                ratio = (i + 1)/(num_side_points + 1)
-                side_point = (
-                    shelf_x + self.shelf_dims[0]/2 + self.safety_margin,
-                    shelf_y - self.shelf_dims[1]/2 + ratio*self.shelf_dims[1],
-                    self.inspection_height
-                )
-                inspection_points.append(side_point)
-        
-        # Add transition points between aisles
-        aisle_transition_height = self.inspection_height + 0.5
-        for i in range(len(self.shelf_positions)-1):
-            curr_shelf = self.shelf_positions[i]
-            next_shelf = self.shelf_positions[i+1]
+            if moving_up:
+                for j in np.arange(min_y - self.aisle_y_width/2, self.warehouse_dims[1]/2, self.aisle_y_width/2):
+                    points.append((aisle_center, j, self.inspection_height))
+            else:
+                for j in np.arange(max_y + self.aisle_y_width/2, -self.warehouse_dims[1]/2, -self.aisle_y_width/2):
+                    points.append((aisle_center, j, self.inspection_height))
+
+            # Transition to next aisle
+            if i < len(aisle_x_coords) - 1:
+                next_x = (aisle_center + aisle_x_coords[i + 1] - self.safety_margin) / 2
+                points.append((next_x, j, self.inspection_height))
             
-            # If moving to new aisle, add transition point at higher altitude
-            if abs(next_shelf[0] - curr_shelf[0]) > self.aisle_width:
-                transition_point = (
-                    (curr_shelf[0] + next_shelf[0])/2,
-                    curr_shelf[1],
-                    aisle_transition_height
-                )
-                inspection_points.append(transition_point)
+            moving_up = not moving_up
         
-        return inspection_points
+        self.inspection_points = points
+
+        return points
 
     def get_next_waypoint(self, 
                          current_pos: Tuple[float, float, float],
@@ -128,7 +119,3 @@ class WarehousePathPlanner:
         dx = target_pos[0] - current_pos[0]
         dy = target_pos[1] - current_pos[1]
         return np.arctan2(dy, dx)
-
-    def get_full_inspection_path(self) -> List[Tuple[float, float, float]]:
-        """Return complete list of inspection waypoints"""
-        return self.inspection_points
