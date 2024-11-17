@@ -1,10 +1,13 @@
 import time
+
 import numpy as np
-from warehouse_env import WarehouseAviary
-from warehouse_path_planner import WarehousePathPlanner
+from gym_pybullet_drones.control.DSLPIDControl import DSLPIDControl
 from gym_pybullet_drones.utils.enums import DroneModel, Physics
 from gym_pybullet_drones.utils.utils import sync
-from gym_pybullet_drones.control.DSLPIDControl import DSLPIDControl
+
+from inventory_logger import InventoryLogger
+from warehouse_env import WarehouseAviary
+from warehouse_path_planner import WarehousePathPlanner
 
 INITIAL_XYZS = np.array([[-4, -6, 1.0]]) # Start in bottom left corner
 INITIAL_RPYS = np.array([[0, 0, 0]])
@@ -17,6 +20,7 @@ AISLE_Y_WIDTH = 2.0
 
 INSPECTION_HEIGHT = 1.0
 SAFETY_MARGIN = 0.75
+DETECTION_RANGE = 1.0
 
 # Initialize environment
 env = WarehouseAviary(
@@ -31,8 +35,13 @@ env = WarehouseAviary(
     warehouse_dims=WAREHOUSE_DIMS,
     shelf_dims=SHELF_DIMS,
     aisle_x_width=AISLE_X_WIDTH,
-    aisle_y_width=AISLE_Y_WIDTH
+    aisle_y_width=AISLE_Y_WIDTH,
+    detection_range=DETECTION_RANGE
 )
+
+# Initialize inventory logger
+logger = InventoryLogger()
+logger.log_initial_inventory(env.inventory_system.inventory)
 
 # Initialize path planner with warehouse dimensions
 path_planner = WarehousePathPlanner(
@@ -48,8 +57,6 @@ path_planner = WarehousePathPlanner(
 ctrl = DSLPIDControl(drone_model=DroneModel.CF2X)
 
 # Flight parameters
-TAKEOFF_HEIGHT = 1.0
-TAKEOFF_STEPS = 480  # 2 seconds at 240Hz
 current_waypoint_idx = 0
 waypoint_thresh = 0.2  # Distance threshold to consider waypoint reached
 time_at_waypoint = 0   # Time spent at current waypoint
@@ -58,16 +65,18 @@ min_time_at_waypoint = 2 * env.PYB_FREQ  # Minimum steps to spend at each waypoi
 # Get full inspection path
 inspection_path = path_planner._generate_inspection_points()
 
-print(f"Total inspection waypoints: {len(inspection_path)}")
-for i, wp in enumerate(inspection_path):
-    print(f"Waypoint {i}: {wp}")
-
-# exit()
+print(f"\nStarting inspection of {len(inspection_path)} waypoints...")
+print(f"Inspection path: {inspection_path}")
+print(f"Initial inventory logged to {logger.log_file}")
+print("Detection progress will be logged to", logger.detection_file)
+print("\nBeginning warehouse inspection...\n")
 
 START = time.time()
+last_scan_time = time.time()
+SCAN_INTERVAL = 1.0  # Scan for packages every second
 
 # Main control loop
-for i in range(60000):  # Increased steps for longer flight
+for i in range(60000):
     state = env._getDroneStateVector(0)
     pos = state[0:3]
     
@@ -88,7 +97,19 @@ for i in range(60000):  # Increased steps for longer flight
             next_pos, next_idx = path_planner.get_next_waypoint(pos, current_waypoint_idx)
             current_waypoint_idx = next_idx
             time_at_waypoint = 0
-            print(f"Moving to waypoint {current_waypoint_idx}: {next_pos}")
+    
+    # Scan for packages periodically
+    current_time = time.time()
+    if current_time - last_scan_time > SCAN_INTERVAL:
+        detections = env.process_drone_view(0)
+        for det in detections:
+            logger.log_detection(
+                item_id=det['item_id'],
+                info=det['info'],
+                drone_pos=pos,
+                timestamp=current_time
+            )
+        last_scan_time = current_time
     
     # Compute control action using PID
     action, _, _ = ctrl.computeControlFromState(
@@ -100,16 +121,20 @@ for i in range(60000):  # Increased steps for longer flight
     
     # Step the environment
     obs, reward, terminated, truncated, info = env.step(action.reshape(1,4))
-    env.render()
-
-    # Print info occasionally
-    if i % 240 == 0:
-        print(f"Drone position: {pos}")
-        print(f"Target position: {target_pos}")
-        print(f"Distance to target: {dist_to_target:.2f}")
-        print(f"Current yaw: {state[9]:.2f}, Target yaw: {target_yaw:.2f}")
+    
+    # Render but suppress output
+    if i % 240 == 0:  # Only render every second
+        env.render()
     
     # Sync to real time
     sync(i, START, env.CTRL_TIMESTEP)
+
+# Print final statistics
+stats = logger.get_detection_stats()
+print("\n=== Inspection Complete ===")
+print(f"Total items detected: {stats['total_detected']}")
+print("\nDetailed logs written to:")
+print(f"Initial inventory: {logger.log_file}")
+print(f"Detection log: {logger.detection_file}")
 
 env.close()

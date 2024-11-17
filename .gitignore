@@ -3,3 +3,4 @@ __pycache__
 gym-pybullet-drones
 .DS_Store
 .vscode
+inventory_logs
