@@ -1,5 +1,7 @@
-import numpy as np
 from typing import List, Tuple
+
+import numpy as np
+
 
 class WarehousePathPlanner:
     """Path planner for warehouse drone navigation"""
@@ -10,7 +12,7 @@ class WarehousePathPlanner:
                 aisle_x_width: float = 1.5,
                 aisle_y_width: float = 1.0,
                 inspection_height: float = 1.0,
-                safety_margin: float = 0.3
+                safety_margin: float = 0.75
                 ):
         """Initialize warehouse path planner
         

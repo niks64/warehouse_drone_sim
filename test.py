@@ -6,6 +6,7 @@ from gym_pybullet_drones.utils.enums import DroneModel, Physics
 from gym_pybullet_drones.utils.utils import sync
 
 from inventory_logger import InventoryLogger
+from utils import capture_frame, setup_camera_and_recorder
 from warehouse_env import WarehouseAviary
 from warehouse_path_planner import WarehousePathPlanner
 
@@ -71,70 +72,81 @@ print(f"Initial inventory logged to {logger.log_file}")
 print("Detection progress will be logged to", logger.detection_file)
 print("\nBeginning warehouse inspection...\n")
 
+VIDEO_WIDTH = 640
+VIDEO_HEIGHT = 480
+video_writer = setup_camera_and_recorder(env, VIDEO_WIDTH, VIDEO_HEIGHT)    
+
 START = time.time()
 last_scan_time = time.time()
 SCAN_INTERVAL = 1.0  # Scan for packages every second
 
-# Main control loop
-for i in range(60000):
-    state = env._getDroneStateVector(0)
-    pos = state[0:3]
-    
-    # Current target
-    target_pos = np.array(inspection_path[current_waypoint_idx])
-    
-    # Get required yaw to face the shelf
-    target_yaw = path_planner.get_required_yaw(pos, target_pos)
-    target_rpy = np.array([0, 0, target_yaw])
-    
-    # Check if we've reached the waypoint
-    dist_to_target = np.linalg.norm(target_pos - pos)
-    
-    if dist_to_target < waypoint_thresh:
-        time_at_waypoint += 1
-        if time_at_waypoint >= min_time_at_waypoint:
-            # Get next waypoint
-            next_pos, next_idx = path_planner.get_next_waypoint(pos, current_waypoint_idx)
-            current_waypoint_idx = next_idx
-            time_at_waypoint = 0
-    
-    # Scan for packages periodically
-    current_time = time.time()
-    if current_time - last_scan_time > SCAN_INTERVAL:
-        detections = env.process_drone_view(0)
-        for det in detections:
-            logger.log_detection(
-                item_id=det['item_id'],
-                info=det['info'],
-                drone_pos=pos,
-                timestamp=current_time
-            )
-        last_scan_time = current_time
-    
-    # Compute control action using PID
-    action, _, _ = ctrl.computeControlFromState(
-        control_timestep=env.CTRL_TIMESTEP,
-        state=state,
-        target_pos=target_pos,
-        target_rpy=target_rpy
-    )
-    
-    # Step the environment
-    obs, reward, terminated, truncated, info = env.step(action.reshape(1,4))
-    
-    # Render but suppress output
-    if i % 240 == 0:  # Only render every second
-        env.render()
-    
-    # Sync to real time
-    sync(i, START, env.CTRL_TIMESTEP)
+try:
+    # Main control loop
+    for i in range(60000):
+        if i % 20 == 0:
+            capture_frame(env, video_writer, VIDEO_WIDTH, VIDEO_HEIGHT)
+        
+        state = env._getDroneStateVector(0)
+        pos = state[0:3]
+        
+        # Current target
+        target_pos = np.array(inspection_path[current_waypoint_idx])
+        
+        # Get required yaw to face the shelf
+        target_yaw = path_planner.get_required_yaw(pos, target_pos)
+        target_rpy = np.array([0, 0, target_yaw])
+        
+        # Check if we've reached the waypoint
+        dist_to_target = np.linalg.norm(target_pos - pos)
+        
+        if dist_to_target < waypoint_thresh:
+            time_at_waypoint += 1
+            if time_at_waypoint >= min_time_at_waypoint:
+                # Get next waypoint
+                next_pos, next_idx = path_planner.get_next_waypoint(pos, current_waypoint_idx)
+                current_waypoint_idx = next_idx
+                time_at_waypoint = 0
+        
+        # Scan for packages periodically
+        current_time = time.time()
+        if current_time - last_scan_time > SCAN_INTERVAL:
+            detections = env.process_drone_view(0)
+            for det in detections:
+                logger.log_detection(
+                    item_id=det['item_id'],
+                    info=det['info'],
+                    drone_pos=pos,
+                    timestamp=current_time
+                )
+            last_scan_time = current_time
+        
+        # Compute control action using PID
+        action, _, _ = ctrl.computeControlFromState(
+            control_timestep=env.CTRL_TIMESTEP,
+            state=state,
+            target_pos=target_pos,
+            target_rpy=target_rpy
+        )
+        
+        # Step the environment
+        obs, reward, terminated, truncated, info = env.step(action.reshape(1,4))
+        
+        # Render but suppress output
+        if i % 240 == 0:  # Only render every second
+            env.render()
+        
+        # Sync to real time
+        sync(i, START, env.CTRL_TIMESTEP)
 
-# Print final statistics
-stats = logger.get_detection_stats()
-print("\n=== Inspection Complete ===")
-print(f"Total items detected: {stats['total_detected']}")
-print("\nDetailed logs written to:")
-print(f"Initial inventory: {logger.log_file}")
-print(f"Detection log: {logger.detection_file}")
-
-env.close()
+    # Print final statistics
+    stats = logger.get_detection_stats()
+    print("\n=== Inspection Complete ===")
+    print(f"Total items detected: {stats['total_detected']}")
+    print("\nDetailed logs written to:")
+    print(f"Initial inventory: {logger.log_file}")
+    print(f"Detection log: {logger.detection_file}")
+except KeyboardInterrupt:
+    pass
+finally:
+    video_writer.release()
+    env.close()
