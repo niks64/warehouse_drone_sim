@@ -19,16 +19,18 @@ class InventorySystem:
                  item_id: str,
                  name: str,
                  quantity: int,
-                 location: Tuple[float, float, float],
+                 location: dict,
                  shelf_id: str
                  ) -> None:
         """Add a new item to inventory
         
         Args:
-            item_id: Unique identifier for item
+            item_id: Unique identifier for item (format: shelf_X_row_Y_pos_Z)
             name: Item name/description
             quantity: Number of items
-            location: (x,y,z) position in warehouse
+            location: Dictionary containing position and location metadata
+                     {'position': [x,y,z], 'shelf_id': str, 'row': int,
+                      'height': float, 'position': str}
             shelf_id: ID of shelf containing item
         """
         self.inventory[item_id] = {
@@ -49,7 +51,7 @@ class InventorySystem:
         """Create a package in PyBullet
         
         Args:
-            item_id: Item ID for package
+            item_id: Item ID for package (format: shelf_X_row_Y_pos_Z)
             position: [x,y,z] position
             size: [width, length, height] 
             color: RGBA color
@@ -119,23 +121,62 @@ class InventorySystem:
         """Update last checked timestamp for an item
         
         Args:
-            item_id: Item ID that was scanned
+            item_id: Item ID that was scanned (format: shelf_X_row_Y_pos_Z)
             timestamp: Time of scan
         """
         if item_id in self.inventory:
             self.inventory[item_id]['last_checked'] = timestamp
-            print(f"Updated inventory for {item_id} at time {timestamp}")
+            shelf_id = self.inventory[item_id]['location']['shelf_id']
+            row = self.inventory[item_id]['location']['row']
+            position = self.inventory[item_id]['location']['position']
+            print(f"Updated inventory for item on shelf {shelf_id}, row {row}, position {position} at time {timestamp}")
             
     def get_item_info(self, item_id: str) -> Dict:
         """Get information about an inventory item
         
         Args:
-            item_id: Item ID to look up
+            item_id: Item ID to look up (format: shelf_X_row_Y_pos_Z)
             
         Returns:
             info: Dict of item information
         """
         return self.inventory.get(item_id, None)
+    
+    def get_items_by_row(self, row_number: int) -> List[Dict]:
+        """Get all items in a specific row
+        
+        Args:
+            row_number: Row number to query (1, 2, or 3)
+            
+        Returns:
+            items: List of items in the specified row
+        """
+        row_items = []
+        for item_id, info in self.inventory.items():
+            if info['location']['row'] == row_number:
+                row_items.append({
+                    'item_id': item_id,
+                    'info': info
+                })
+        return row_items
+    
+    def get_items_by_shelf(self, shelf_id: str) -> List[Dict]:
+        """Get all items on a specific shelf
+        
+        Args:
+            shelf_id: Shelf ID to query
+            
+        Returns:
+            items: List of items on the specified shelf
+        """
+        shelf_items = []
+        for item_id, info in self.inventory.items():
+            if info['location']['shelf_id'] == shelf_id:
+                shelf_items.append({
+                    'item_id': item_id,
+                    'info': info
+                })
+        return shelf_items
     
     def get_unchecked_items(self, threshold: float) -> List[str]:
         """Get items not checked within time threshold
@@ -147,8 +188,9 @@ class InventorySystem:
             items: List of item IDs needing check
         """
         unchecked = []
+        current_time = time.time()
         for item_id, info in self.inventory.items():
             if info['last_checked'] is None or \
-               (time.time() - info['last_checked']) > threshold:
+               (current_time - info['last_checked']) > threshold:
                 unchecked.append(item_id)
         return unchecked

@@ -45,26 +45,27 @@ logger = InventoryLogger()
 logger.log_initial_inventory(env.inventory_system.inventory)
 
 # Initialize path planner with warehouse dimensions
-path_planner = WarehousePathPlanner(
-    warehouse_dims=WAREHOUSE_DIMS,
-    shelf_dims=SHELF_DIMS,
-    aisle_x_width=AISLE_X_WIDTH,
-    aisle_y_width=AISLE_Y_WIDTH,
-    inspection_height=INSPECTION_HEIGHT,
-    safety_margin=SAFETY_MARGIN
-)
+# path_planner = WarehousePathPlanner(
+#     warehouse_dims=WAREHOUSE_DIMS,
+#     shelf_dims=SHELF_DIMS,
+#     aisle_x_width=AISLE_X_WIDTH,
+#     aisle_y_width=AISLE_Y_WIDTH,
+#     inspection_height=INSPECTION_HEIGHT,
+#     safety_margin=SAFETY_MARGIN
+# )
 
+inspection_path = env.path_planner.generate_inspection_waypoints_package_positions()
 # Initialize PID controller
 ctrl = DSLPIDControl(drone_model=DroneModel.CF2X)
+ctrl.P_COEFF_FOR = ctrl.P_COEFF_FOR * 0.5
+ctrl.P_COEFF_TOR = ctrl.P_COEFF_TOR * 0.5
+# ctrl.D_COEFF_FOR = ctrl.D_COEFF_FOR * 1.5
 
 # Flight parameters
 current_waypoint_idx = 0
 waypoint_thresh = 0.2  # Distance threshold to consider waypoint reached
 time_at_waypoint = 0   # Time spent at current waypoint
-min_time_at_waypoint = 2 * env.PYB_FREQ  # Minimum steps to spend at each waypoint
-
-# Get full inspection path
-inspection_path = path_planner._generate_inspection_points()
+min_time_at_waypoint = 0  # Minimum steps to spend at each waypoint
 
 print(f"\nStarting inspection of {len(inspection_path)} waypoints...")
 print(f"Inspection path: {inspection_path}")
@@ -72,9 +73,9 @@ print(f"Initial inventory logged to {logger.log_file}")
 print("Detection progress will be logged to", logger.detection_file)
 print("\nBeginning warehouse inspection...\n")
 
-VIDEO_WIDTH = 640
-VIDEO_HEIGHT = 480
-video_writer = setup_camera_and_recorder(env, VIDEO_WIDTH, VIDEO_HEIGHT)    
+# VIDEO_WIDTH = 640
+# VIDEO_HEIGHT = 480
+# video_writer = setup_camera_and_recorder(env, VIDEO_WIDTH, VIDEO_HEIGHT)    
 
 START = time.time()
 last_scan_time = time.time()
@@ -83,8 +84,8 @@ SCAN_INTERVAL = 1.0  # Scan for packages every second
 try:
     # Main control loop
     for i in range(60000):
-        if i % 20 == 0:
-            capture_frame(env, video_writer, VIDEO_WIDTH, VIDEO_HEIGHT)
+        # if i % 20 == 0:
+        #     capture_frame(env, video_writer, VIDEO_WIDTH, VIDEO_HEIGHT)
         
         state = env._getDroneStateVector(0)
         pos = state[0:3]
@@ -93,7 +94,7 @@ try:
         target_pos = np.array(inspection_path[current_waypoint_idx])
         
         # Get required yaw to face the shelf
-        target_yaw = path_planner.get_required_yaw(pos, target_pos)
+        target_yaw = env.path_planner.get_required_yaw(pos, target_pos)
         target_rpy = np.array([0, 0, target_yaw])
         
         # Check if we've reached the waypoint
@@ -102,8 +103,7 @@ try:
         if dist_to_target < waypoint_thresh:
             time_at_waypoint += 1
             if time_at_waypoint >= min_time_at_waypoint:
-                # Get next waypoint
-                next_pos, next_idx = path_planner.get_next_waypoint(pos, current_waypoint_idx)
+                next_pos, next_idx = env.path_planner.get_next_waypoint(pos, current_waypoint_idx)
                 current_waypoint_idx = next_idx
                 time_at_waypoint = 0
         
@@ -148,5 +148,5 @@ try:
 except KeyboardInterrupt:
     pass
 finally:
-    video_writer.release()
+    # video_writer.release()
     env.close()

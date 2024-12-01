@@ -8,6 +8,7 @@ from gymnasium import spaces
 
 from drone_vision_system import DroneVisionSystem
 from inventory_system import InventorySystem
+from warehouse_path_planner import WarehousePathPlanner
 
 
 class WarehouseAviary(BaseAviary):
@@ -24,7 +25,7 @@ class WarehouseAviary(BaseAviary):
                  ctrl_freq: int = 240,
                  gui=False,
                  record=False,
-                 obstacles=True,
+                 obstacles=False,
                  user_debug_gui=True,
                  output_folder='results',
                  warehouse_dims=(10.0, 10.0, 3.0),
@@ -48,6 +49,14 @@ class WarehouseAviary(BaseAviary):
                         user_debug_gui=user_debug_gui,
                         output_folder=output_folder
                         )
+        if gui:
+            p.resetDebugVisualizerCamera(
+                cameraDistance=12.0,
+                cameraYaw=0, 
+                cameraPitch=-60,
+                cameraTargetPosition=[0, 0, 0],
+                physicsClientId=self.CLIENT
+            )
         
         # Initialize warehouse dimensions
         self.WAREHOUSE_WIDTH = warehouse_dims[0]
@@ -64,6 +73,14 @@ class WarehouseAviary(BaseAviary):
         self.vision_system = DroneVisionSystem(
             detection_range=detection_range
         )
+
+        self.path_planner = WarehousePathPlanner(
+            warehouse_dims=warehouse_dims,
+            shelf_dims=shelf_dims,
+            aisle_x_width=aisle_x_width,
+            aisle_y_width=aisle_y_width
+        )
+        self.path_planner.package_positions = []
         
         # Create warehouse structure
         self._create_warehouse(shelf_dims)
@@ -97,13 +114,6 @@ class WarehouseAviary(BaseAviary):
             [-self.WAREHOUSE_WIDTH/2, 0, self.WAREHOUSE_HEIGHT/2],  # Left wall
             [0.1, self.WAREHOUSE_LENGTH, self.WAREHOUSE_HEIGHT]
         )
-        
-        # Create shelves and packages
-        # shelf_positions = self._generate_shelf_positions()
-        # for pos in shelf_positions:
-        #     self._create_box(pos, shelf_dims)
-        #     # Add packages on each shelf
-        #     self._add_packages_to_shelf(pos)
 
         shelf_positions = self._generate_shelf_positions()
         for i, pos in enumerate(shelf_positions):
@@ -111,35 +121,80 @@ class WarehouseAviary(BaseAviary):
             self._add_packages_to_shelf(pos[0], pos[1])
 
     def _add_packages_to_shelf(self, shelf_pos, shelf_id):
-        """Add packages to a shelf."""
+        """Add packages to a shelf.
+        
+        Creates three rows of packages, with three packages per row.
+        Each package ID includes shelf, row, and position information.
+        """
+        # Define the positions for each package relative to shelf center
+        # Format: [x_offset, y_offset, z_offset]
         package_positions = [
-            [0.0, -0.8],  # Left side
-            [0.0, 0.0],   # Center
-            [0.0, 0.8],   # Right side
+            # Bottom row (row 1)
+            [0.0, -0.8, 0.3],  # Left 
+            [0.0, 0.0, 0.3],   # Center
+            [0.0, 0.8, 0.3],   # Right
+            
+            # Middle row (row 2)
+            [0.0, -0.8, 0.9],  # Left
+            [0.0, 0.0, 0.9],   # Center
+            [0.0, 0.8, 0.9],   # Right
+            
+            # Top row (row 3)
+            [0.0, -0.8, 1.5],  # Left
+            [0.0, 0.0, 1.5],   # Center
+            [0.0, 0.8, 1.5],   # Right
         ]
+        
+        # Different colors for each package to make them visually distinguishable
         colors = [
+            # Bottom row
             [1, 0, 0, 1],     # Red
             [0, 1, 0, 1],     # Green
             [0, 0, 1, 1],     # Blue
+            
+            # Middle row
+            [1, 1, 0, 1],     # Yellow
+            [1, 0, 1, 1],     # Magenta
+            [0, 1, 1, 1],     # Cyan
+            
+            # Top row
+            [0.5, 0, 0, 1],   # Dark red
+            [0, 0.5, 0, 1],   # Dark green
+            [0, 0, 0.5, 1],   # Dark blue
         ]
         
-        for i, ((x_offset, y_offset), color) in enumerate(zip(package_positions, colors)):
-            # Position package on shelf
+        # Create packages for each position
+        for i, ((x_offset, y_offset, z_offset), color) in enumerate(zip(package_positions, colors)):
+            # Calculate row number (1, 2, or 3) and position (0, 1, 2)
+            row_num = (i // 3) + 1
+            pos_num = i % 3
+            position_name = ["left", "center", "right"][pos_num]
+            
+            # Create unique item ID including shelf, row, and position
+            item_id = f"shelf_{shelf_id}_row_{row_num}_pos_{pos_num}"
+            
+            # Calculate absolute position
             package_pos = [
                 shelf_pos[0] + x_offset,  # Offset from shelf center
                 shelf_pos[1] + y_offset,  # Different positions along shelf
-                shelf_pos[2] + 0.3        # Slightly above shelf
+                z_offset
             ]
             
-            # Create unique item ID
-            item_id = f"item_{shelf_id}_{i}"
+            # Add position to path planner
+            self.path_planner.package_positions.append((item_id, package_pos))
             
-            # Add item to inventory
+            # Add item to inventory with detailed location information
             self.inventory_system.add_item(
                 item_id=item_id,
-                name=f"Package {i} on shelf {shelf_id}",
+                name=f"Package on shelf {shelf_id}, row {row_num} ({z_offset:.1f}m height), {position_name} position",
                 quantity=1,
-                location=package_pos,
+                location={
+                    'position': package_pos,
+                    'shelf_id': shelf_id,
+                    'row': row_num,
+                    'height': z_offset,
+                    'position': position_name
+                },
                 shelf_id=shelf_id
             )
             

@@ -86,6 +86,40 @@ class WarehousePathPlanner:
         self.inspection_points = points
 
         return points
+    
+    def generate_inspection_waypoints_package_positions(self) -> List[Tuple[float, float, float]]:
+        # Arrange self.package_positions in a snake pattern. Generate inspect points to the left of each position. when you are about to switch to the next aisle and the x changes, add tow transition points that move close to the end of the aisle, then move over to the next aisle so that it can start moving down.
+        points = []
+
+        aisle_x_coords = sorted(list(set([package[1][0] for package in self.package_positions])))
+        min_y = min([package[1][1] for package in self.package_positions]) - self.aisle_y_width/2
+        max_y = max([package[1][1] for package in self.package_positions]) + self.aisle_y_width/2
+        aisle_z_coords = sorted(list(set([package[1][2] for package in self.package_positions])))
+
+        print(f"There are {len(aisle_z_coords)} rows of packages")
+
+        moving_up = True
+        for i, x in enumerate(aisle_x_coords):
+            aisle_center = x - self.safety_margin
+
+            for z in aisle_z_coords:
+                if moving_up:
+                    for j in np.arange(min_y - self.aisle_y_width/4, max_y + self.aisle_y_width/4, self.aisle_y_width/4):
+                        points.append((aisle_center, j, z))
+                else:
+                    for j in np.arange(max_y + self.aisle_y_width/4, min_y - self.aisle_y_width/4, -self.aisle_y_width/4):
+                        points.append((aisle_center, j, z))
+
+                moving_up = not moving_up
+
+            # Transition to next aisle
+            if i < len(aisle_x_coords) - 1:
+                next_x = (aisle_center + aisle_x_coords[i + 1] - self.safety_margin) / 2
+                points.append((next_x, j, z))
+
+        self.inspection_points = points
+
+        return points
 
     def get_next_waypoint(self, 
                          current_pos: Tuple[float, float, float],
