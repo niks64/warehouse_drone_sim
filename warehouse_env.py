@@ -77,6 +77,7 @@ class WarehouseAviary(BaseAviary):
         self.path_planner = WarehousePathPlanner(
             warehouse_dims=warehouse_dims,
             shelf_dims=shelf_dims,
+            num_drones=num_drones,
             aisle_x_width=aisle_x_width,
             aisle_y_width=aisle_y_width
         )
@@ -84,6 +85,59 @@ class WarehouseAviary(BaseAviary):
         
         # Create warehouse structure
         self._create_warehouse(shelf_dims)
+        
+        # Track detected items per drone to avoid duplicates
+        self.drone_detections = {i: set() for i in range(num_drones)}
+        
+        # Store last process time for each drone
+        self.last_process_times = {i: time.time() for i in range(num_drones)}
+
+    def process_drone_view(self, drone_idx: int):
+        """Process drone's view for package detection with duplicate prevention.
+        
+        Args:
+            drone_idx: Index of the drone to process
+            
+        Returns:
+            List of newly detected items for this drone
+        """
+        state = self._getDroneStateVector(drone_idx)
+        pos = state[0:3]
+        
+        # Detect packages
+        detections = self.vision_system.detect_packages(
+            drone_pos=pos,
+            inventory_system=self.inventory_system,
+            client_id=self.CLIENT
+        )
+        
+        # Filter out previously detected items for this drone
+        new_detections = []
+        for detection in detections:
+            item_id = detection['item_id']
+            if item_id not in self.drone_detections[drone_idx]:
+                self.drone_detections[drone_idx].add(item_id)
+                new_detections.append(detection)
+                
+                # Update inventory timestamp
+                self.inventory_system.update_inventory(
+                    item_id=item_id,
+                    timestamp=time.time()
+                )
+        
+        self.last_process_times[drone_idx] = time.time()
+        return new_detections
+
+    def get_drone_detections(self, drone_idx: int):
+        """Get set of items detected by specific drone."""
+        return self.drone_detections[drone_idx]
+
+    def get_total_unique_detections(self):
+        """Get total number of unique items detected across all drones."""
+        all_detections = set()
+        for drone_detections in self.drone_detections.values():
+            all_detections.update(drone_detections)
+        return len(all_detections)
 
     def _create_warehouse(self, shelf_dims):
         """Create warehouse structure with shelves and aisles."""
@@ -145,26 +199,8 @@ class WarehouseAviary(BaseAviary):
             [0.0, 0.8, 1.5],   # Right
         ]
         
-        # Different colors for each package to make them visually distinguishable
-        colors = [
-            # Bottom row
-            [1, 0, 0, 1],     # Red
-            [0, 1, 0, 1],     # Green
-            [0, 0, 1, 1],     # Blue
-            
-            # Middle row
-            [1, 1, 0, 1],     # Yellow
-            [1, 0, 1, 1],     # Magenta
-            [0, 1, 1, 1],     # Cyan
-            
-            # Top row
-            [0.5, 0, 0, 1],   # Dark red
-            [0, 0.5, 0, 1],   # Dark green
-            [0, 0, 0.5, 1],   # Dark blue
-        ]
-        
         # Create packages for each position
-        for i, ((x_offset, y_offset, z_offset), color) in enumerate(zip(package_positions, colors)):
+        for i, (x_offset, y_offset, z_offset) in enumerate(package_positions):
             # Calculate row number (1, 2, or 3) and position (0, 1, 2)
             row_num = (i // 3) + 1
             pos_num = i % 3
@@ -200,6 +236,8 @@ class WarehouseAviary(BaseAviary):
             
             # Create package
             size = [0.5, 0.3, 0.3]  # Smaller packages for better visibility
+            # brown color like a package
+            color = [0.5, 0.3, 0.1, 1]
             self.inventory_system.create_package(
                 item_id=item_id,
                 position=package_pos,
@@ -270,27 +308,6 @@ class WarehouseAviary(BaseAviary):
             drone_orientation=quat,
             client_id=self.CLIENT
         )
-
-    def process_drone_view(self, drone_idx: int):
-        """Process drone's view for package detection."""
-        state = self._getDroneStateVector(drone_idx)
-        pos = state[0:3]
-        
-        # Detect packages
-        detections = self.vision_system.detect_packages(
-            drone_pos=pos,
-            inventory_system=self.inventory_system,
-            client_id=self.CLIENT
-        )
-        
-        # Update inventory for detected items
-        for detection in detections:
-            self.inventory_system.update_inventory(
-                item_id=detection['item_id'],
-                timestamp=time.time()
-            )
-            
-        return detections
 
     def _actionSpace(self):
         """Returns the action space of the environment."""
