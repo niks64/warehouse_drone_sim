@@ -1,5 +1,8 @@
+import os
 import time
+from typing import Dict, List, Tuple
 
+import cv2
 import numpy as np
 import pybullet as p
 from gym_pybullet_drones.envs.BaseAviary import BaseAviary
@@ -32,7 +35,8 @@ class WarehouseAviary(BaseAviary):
                  shelf_dims=(0.5, 2.0, 2.0),
                  aisle_x_width=1.5,
                  aisle_y_width=1.0,
-                 detection_range=1.0
+                 detection_range=1.0,
+                 qr_folder='qr_codes'
                  ):
         """Initialize warehouse environment."""
         super().__init__(drone_model=drone_model,
@@ -57,6 +61,13 @@ class WarehouseAviary(BaseAviary):
                 cameraTargetPosition=[0, 0, 0],
                 physicsClientId=self.CLIENT
             )
+            
+            # Enable shadow mapping for better QR code visualization
+            p.configureDebugVisualizer(
+                p.COV_ENABLE_SHADOWS,
+                1,
+                physicsClientId=self.CLIENT
+            )
         
         # Initialize warehouse dimensions
         self.WAREHOUSE_WIDTH = warehouse_dims[0]
@@ -67,11 +78,14 @@ class WarehouseAviary(BaseAviary):
         self.SHELF_HEIGHT = shelf_dims[2]
         self.AISLE_X_WIDTH = aisle_x_width
         self.AISLE_Y_WIDTH = aisle_y_width
+        self.gui = gui
 
-        # Initialize inventory and vision systems
-        self.inventory_system = InventorySystem()
+        # Initialize systems
+        self.inventory_system = InventorySystem(qr_folder=qr_folder)
         self.vision_system = DroneVisionSystem(
-            detection_range=detection_range
+            detection_range=detection_range,
+            image_width=640,  # Increased resolution for better QR detection
+            image_height=480
         )
 
         self.path_planner = WarehousePathPlanner(
@@ -84,6 +98,9 @@ class WarehouseAviary(BaseAviary):
         
         # Create warehouse structure
         self._create_warehouse(shelf_dims)
+        
+        # Store drone IDs in inventory system
+        self.inventory_system.drone_id = self.DRONE_IDS[0]
 
     def _create_warehouse(self, shelf_dims):
         """Create warehouse structure with shelves and aisles."""
@@ -121,13 +138,12 @@ class WarehouseAviary(BaseAviary):
             self._add_packages_to_shelf(pos[0], pos[1])
 
     def _add_packages_to_shelf(self, shelf_pos, shelf_id):
-        """Add packages to a shelf.
+        """Add packages to a shelf with QR codes
         
         Creates three rows of packages, with three packages per row.
-        Each package ID includes shelf, row, and position information.
+        Each package has a QR code on its front face.
         """
-        # Define the positions for each package relative to shelf center
-        # Format: [x_offset, y_offset, z_offset]
+        # Package positions relative to shelf center
         package_positions = [
             # Bottom row (row 1)
             [0.0, -0.8, 0.3],  # Left 
@@ -145,38 +161,32 @@ class WarehouseAviary(BaseAviary):
             [0.0, 0.8, 1.5],   # Right
         ]
         
-        # Different colors for each package to make them visually distinguishable
+        # Base colors for packages
         colors = [
-            # Bottom row
             [1, 0, 0, 1],     # Red
             [0, 1, 0, 1],     # Green
             [0, 0, 1, 1],     # Blue
-            
-            # Middle row
             [1, 1, 0, 1],     # Yellow
             [1, 0, 1, 1],     # Magenta
             [0, 1, 1, 1],     # Cyan
-            
-            # Top row
             [0.5, 0, 0, 1],   # Dark red
             [0, 0.5, 0, 1],   # Dark green
             [0, 0, 0.5, 1],   # Dark blue
         ]
         
-        # Create packages for each position
+        # Create packages with QR codes
         for i, ((x_offset, y_offset, z_offset), color) in enumerate(zip(package_positions, colors)):
-            # Calculate row number (1, 2, or 3) and position (0, 1, 2)
             row_num = (i // 3) + 1
             pos_num = i % 3
             position_name = ["left", "center", "right"][pos_num]
             
-            # Create unique item ID including shelf, row, and position
+            # Create unique item ID
             item_id = f"shelf_{shelf_id}_row_{row_num}_pos_{pos_num}"
             
             # Calculate absolute position
             package_pos = [
-                shelf_pos[0] + x_offset,  # Offset from shelf center
-                shelf_pos[1] + y_offset,  # Different positions along shelf
+                shelf_pos[0] + x_offset,
+                shelf_pos[1] + y_offset,
                 z_offset
             ]
             
@@ -198,15 +208,55 @@ class WarehouseAviary(BaseAviary):
                 shelf_id=shelf_id
             )
             
-            # Create package
+            # Create package with QR code texture
             size = [0.5, 0.3, 0.3]  # Smaller packages for better visibility
+            box_color = [0.6, 0.4, 0.2, 1]  # Brown cardboard-like color
             self.inventory_system.create_package(
                 item_id=item_id,
                 position=package_pos,
                 size=size,
-                color=color,
+                color=box_color,
                 client_id=self.CLIENT
             )
+
+    def process_drone_view(self, drone_idx: int) -> List[Dict]:
+        """Process drone's view for QR code detection"""
+        state = self._getDroneStateVector(drone_idx)
+        pos = state[0:3]
+        
+        # Get drone's camera view and detect QR codes
+        rgb, _, _ = self.vision_system.get_camera_image(
+            drone_pos=pos,
+            drone_orientation=state[3:7],
+            client_id=self.CLIENT
+        )
+        
+        # Detect and process QR codes
+        detections = self.vision_system.detect_packages(
+            drone_pos=pos,
+            inventory_system=self.inventory_system,
+            client_id=self.CLIENT
+        )
+        
+        # Update inventory for detected items
+        current_time = time.time()
+        for detection in detections:
+            self.inventory_system.update_inventory(
+                item_id=detection['item_id'],
+                timestamp=current_time
+            )
+            
+        # Optionally save visualization for debugging
+        if self.gui and len(detections) > 0:
+            vis_img = self.vision_system.visualize_detections(rgb, detections)
+            debug_path = os.path.join(self.inventory_system.qr_folder, 'debug')
+            os.makedirs(debug_path, exist_ok=True)
+            cv2.imwrite(
+                os.path.join(debug_path, f"detection_{int(current_time)}.jpg"),
+                cv2.cvtColor(vis_img, cv2.COLOR_RGB2BGR)
+            )
+            
+        return detections
 
     def _create_box(self, position, size):
         """Create a box obstacle in the environment.
@@ -270,27 +320,6 @@ class WarehouseAviary(BaseAviary):
             drone_orientation=quat,
             client_id=self.CLIENT
         )
-
-    def process_drone_view(self, drone_idx: int):
-        """Process drone's view for package detection."""
-        state = self._getDroneStateVector(drone_idx)
-        pos = state[0:3]
-        
-        # Detect packages
-        detections = self.vision_system.detect_packages(
-            drone_pos=pos,
-            inventory_system=self.inventory_system,
-            client_id=self.CLIENT
-        )
-        
-        # Update inventory for detected items
-        for detection in detections:
-            self.inventory_system.update_inventory(
-                item_id=detection['item_id'],
-                timestamp=time.time()
-            )
-            
-        return detections
 
     def _actionSpace(self):
         """Returns the action space of the environment."""
