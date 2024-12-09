@@ -6,7 +6,7 @@ import pybullet as p
 
 
 # Add this function to test.py
-def setup_camera_and_recorder(env, width=640, height=480):
+def setup_camera_and_recorder(env, width=1920, height=1080):
     """Setup fixed camera view and video recorder
     
     Args:
@@ -18,10 +18,10 @@ def setup_camera_and_recorder(env, width=640, height=480):
         video_writer: OpenCV VideoWriter object
     """
     # Set camera parameters for a side view of warehouse
-    camera_distance = 7.5
+    camera_distance = 8
     camera_yaw = 0
-    camera_pitch = -89.9  # Angle up/down
-    camera_target = [-2, -1.5, 0]
+    camera_pitch = -60
+    camera_target = [-2.5, -2, 0]
     
     # Set the camera view in PyBullet
     p.resetDebugVisualizerCamera(
@@ -34,8 +34,9 @@ def setup_camera_and_recorder(env, width=640, height=480):
     
     # Create video writer
     output_path = f'warehouse_inspection_{datetime.now().strftime("%Y%m%d_%H%M%S")}.mp4'
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    fps = 24  # Frames per second for the video
+    # fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    fourcc = cv2.VideoWriter_fourcc(*'H264')
+    fps = 30
     video_writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
     
     return video_writer
@@ -47,6 +48,9 @@ def capture_frame(env, video_writer, width=640, height=480):
         width=width,
         height=height,
         renderer=p.ER_BULLET_HARDWARE_OPENGL,
+        flags=p.ER_NO_SEGMENTATION_MASK,
+        shadow=1,  # Enable shadows
+        lightDirection=[1, 1, 1],  # Better lighting
         physicsClientId=env.CLIENT
     )
     

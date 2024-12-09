@@ -1,11 +1,13 @@
 import time
 
 import numpy as np
+import pybullet as p
 from gym_pybullet_drones.control.DSLPIDControl import DSLPIDControl
 from gym_pybullet_drones.utils.enums import DroneModel, Physics
 from gym_pybullet_drones.utils.utils import sync
 
 from inventory_logger import InventoryLogger
+from utils import capture_frame, setup_camera_and_recorder
 from warehouse_env import WarehouseAviary
 
 # Warehouse configuration
@@ -65,13 +67,16 @@ def run_multi_drone_inspection():
     for i in range(NUM_DRONES):
         print(f"Drone {i} path length: {len(inspection_paths[i])} waypoints")
 
+    VIDEO_WIDTH = 640
+    VIDEO_HEIGHT = 480
+    video_writer = setup_camera_and_recorder(env, VIDEO_WIDTH, VIDEO_HEIGHT)    
+
     START = time.time()
     last_scan_time = time.time()
     SCAN_INTERVAL = 1.0
 
     try:
         action = np.zeros((NUM_DRONES, 4))
-        
         for i in range(60000):
             for drone_id in range(NUM_DRONES):
                 state = env._getDroneStateVector(drone_id)
@@ -116,6 +121,9 @@ def run_multi_drone_inspection():
             
             obs, reward, terminated, truncated, info = env.step(action)
             
+            if i % 40 == 0:
+                capture_frame(env, video_writer, VIDEO_WIDTH, VIDEO_HEIGHT)
+
             if i % 240 == 0:
                 env.render()
             
@@ -128,6 +136,7 @@ def run_multi_drone_inspection():
     except KeyboardInterrupt:
         pass
     finally:
+        video_writer.release()
         env.close()
 
 if __name__ == "__main__":
