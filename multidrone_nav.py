@@ -26,7 +26,7 @@ INITIAL_XYZS = np.array([
 ])
 INITIAL_RPYS = np.array([[0, 0, 0] for _ in range(NUM_DRONES)])
 
-MAP_FILE = "warehouse_map_20241210_012302.pkl"
+MAP_FILE = "warehouse_mapping.pkl"
 
 def run_multi_drone_inspection():
     with open(MAP_FILE, 'rb') as f:
