@@ -32,7 +32,8 @@ class WarehouseAviary(BaseAviary):
                  shelf_dims=(0.5, 2.0, 2.0),
                  aisle_x_width=1.5,
                  aisle_y_width=1.0,
-                 detection_range=1.0
+                 detection_range=1.0,
+                 map_data=None
                  ):
         """Initialize warehouse environment."""
         super().__init__(drone_model=drone_model,
@@ -79,9 +80,9 @@ class WarehouseAviary(BaseAviary):
             shelf_dims=shelf_dims,
             num_drones=num_drones,
             aisle_x_width=aisle_x_width,
-            aisle_y_width=aisle_y_width
+            aisle_y_width=aisle_y_width,
+            map_data=map_data
         )
-        self.path_planner.package_positions = []
         
         # Create warehouse structure
         self._create_warehouse(shelf_dims)
@@ -217,7 +218,7 @@ class WarehouseAviary(BaseAviary):
             ]
             
             # Add position to path planner
-            self.path_planner.package_positions.append((item_id, package_pos))
+            # self.path_planner.package_positions.append((item_id, package_pos))
             
             # Add item to inventory with detailed location information
             self.inventory_system.add_item(

@@ -13,7 +13,8 @@ class WarehousePathPlanner:
                 aisle_x_width: float = 1.5,
                 aisle_y_width: float = 1.0,
                 inspection_height: float = 1.0,
-                safety_margin: float = 0.5
+                safety_margin: float = 0.75,
+                map_data: Dict = None
                 ):
         """Initialize warehouse path planner
         
@@ -33,12 +34,15 @@ class WarehousePathPlanner:
         self.inspection_height = inspection_height
         self.safety_margin = safety_margin
         self.num_waypoints_interpolation = 20
+        self.map_data = map_data
         
         # Calculate grid of shelf positions
-        self.shelf_positions = self._generate_shelf_grid()
+        self.shelf_positions = self._generate_shelf_grid() if map_data is None else map_data['shelf_positions']
         
         # Will be populated with package positions later
         self.package_positions = []
+        if self.map_data is not None:
+            self.package_positions = self._generate_package_positions()
         
         # Store drone-specific paths
         self.drone_paths = {}
@@ -54,6 +58,41 @@ class WarehousePathPlanner:
                         for start, end in zip(start_pos, end_pos))
             points.append(point)
         return points
+
+    def _generate_package_positions(self) -> List[Tuple[str, Tuple[float, float, float]]]:
+        """Generate package positions from shelf positions"""
+        package_offsets = [
+            # Bottom row (row 1)
+            [0.0, -0.8, 0.3],  # Left 
+            [0.0, 0.0, 0.3],   # Center
+            [0.0, 0.8, 0.3],   # Right
+            
+            # Middle row (row 2)
+            [0.0, -0.8, 0.9],  # Left
+            [0.0, 0.0, 0.9],   # Center
+            [0.0, 0.8, 0.9],   # Right
+            
+            # Top row (row 3)
+            [0.0, -0.8, 1.5],  # Left
+            [0.0, 0.0, 1.5],   # Center
+            [0.0, 0.8, 1.5],   # Right
+        ]
+
+        # Correct shelf positions
+        for i in range(1, len(self.shelf_positions)):
+            current_x = self.shelf_positions[i]['position'][0]
+            prev_x = self.shelf_positions[i - 1]['position'][0]
+            if current_x - prev_x > 0.1 and current_x - prev_x < self.aisle_x_width:
+                self.shelf_positions[i]['position'] = (prev_x, self.shelf_positions[i]['position'][1], self.shelf_positions[i]['position'][2])
+
+        package_positions = []
+        for shelf_id, shelf in enumerate(self.shelf_positions):
+            pos = shelf['position']
+            for i, offset in enumerate(package_offsets):
+                package_positions.append((f"{shelf_id}_{i}", 
+                                        (pos[0] + offset[0], pos[1] + offset[1], offset[2])))
+                
+        return package_positions
 
     def _generate_shelf_grid(self) -> List[Dict]:
         """Generate grid of shelf boxes with their dimensions"""
@@ -95,15 +134,11 @@ class WarehousePathPlanner:
         
         # Sort aisles by x-coordinate
         sorted_aisles = sorted(aisle_packages.keys())
+        print(f"SORTED AISLES: {sorted_aisles}")
         
         # Initialize assignments
         assignments = {i: [] for i in range(self.num_drones)}
         
-        # Assign alternating aisles to drones
-        # for i, aisle in enumerate(sorted_aisles):
-        #     drone_id = i % self.num_drones
-        #     for package_id, pos in aisle_packages[aisle]:
-        #         assignments[drone_id].append(package_id)
         # Assign equal number of aisles to each drone. If odd number, last drone gets one less aisle
         aisles_per_drone = len(sorted_aisles) // self.num_drones
         for i, aisle in enumerate(sorted_aisles):

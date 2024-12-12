@@ -1,6 +1,4 @@
-import json
 import os
-import time
 from datetime import datetime
 from typing import Dict, List
 
@@ -18,12 +16,10 @@ class InventoryLogger:
         if not os.path.exists(output_folder):
             os.makedirs(output_folder)
             
-        # Create timestamped log file
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.log_file = os.path.join(output_folder, f"inventory_log_{timestamp}.txt")
         self.detection_file = os.path.join(output_folder, f"detection_log_{timestamp}.txt")
         
-        # Set of detected items to avoid duplicates
         self.detected_items = set()
         
     def log_initial_inventory(self, inventory: Dict) -> None:
@@ -35,19 +31,16 @@ class InventoryLogger:
         with open(self.log_file, 'w') as f:
             f.write("=== Initial Inventory State ===\n\n")
             
-            # Sort items by shelf ID for better readability
             sorted_items = sorted(inventory.items(), 
                                 key=lambda x: (x[1]['shelf_id'], x[0]))
             
             current_shelf = None
             for item_id, info in sorted_items:
-                # Add shelf header if new shelf
                 if info['shelf_id'] != current_shelf:
                     current_shelf = info['shelf_id']
                     f.write(f"\nShelf {current_shelf}:\n")
                     f.write("-" * 40 + "\n")
                 
-                # Write item info
                 f.write(f"Item ID: {item_id}\n")
                 f.write(f"  Name: {info['name']}\n")
                 f.write(f"  Location: {info['location']}\n")
@@ -67,7 +60,6 @@ class InventoryLogger:
             drone_pos: Current drone position
             timestamp: Detection timestamp
         """
-        # Only log first detection of each item
         if item_id not in self.detected_items:
             self.detected_items.add(item_id)
             
@@ -82,7 +74,6 @@ class InventoryLogger:
                 f.write(f"Drone Position: {[round(x, 2) for x in drone_pos]}\n")
                 f.write("-" * 40 + "\n\n")
                 
-            # Also print to console for immediate feedback
             print(f"\n[DETECTION] {formatted_time} - Found {info['name']} on {info['shelf_id']}")
     
     def get_detection_stats(self) -> Dict:

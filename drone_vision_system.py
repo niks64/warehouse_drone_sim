@@ -35,7 +35,6 @@ class DroneVisionSystem:
         self.far = far_val
         self.detection_range = detection_range
         
-        # Camera matrices
         self.proj_matrix = p.computeProjectionMatrixFOV(
             fov=self.fov,
             aspect=self.width / self.height,
@@ -60,11 +59,9 @@ class DroneVisionSystem:
             depth: Depth image array 
             seg: Segmentation image array
         """
-        # Calculate camera view matrix
         rot_matrix = p.getMatrixFromQuaternion(drone_orientation)
         rot_matrix = np.array(rot_matrix).reshape(3, 3)
         
-        # Camera faces forward along x-axis
         forward = rot_matrix.dot(np.array([1, 0, 0]))
         up = rot_matrix.dot(np.array([0, 0, 1]))
         
@@ -77,7 +74,6 @@ class DroneVisionSystem:
             physicsClientId=client_id
         )
         
-        # Get camera image
         width, height, rgb, depth, seg = p.getCameraImage(
             width=self.width,
             height=self.height,
@@ -86,7 +82,7 @@ class DroneVisionSystem:
             physicsClientId=client_id
         )
         
-        rgb = np.array(rgb).reshape(height, width, 4)[:,:,:3]  # Remove alpha
+        rgb = np.array(rgb).reshape(height, width, 4)[:,:,:3]
         depth = np.array(depth).reshape(height, width)
         seg = np.array(seg).reshape(height, width)
         

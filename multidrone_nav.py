@@ -1,3 +1,4 @@
+import pickle
 import time
 
 import numpy as np
@@ -9,23 +10,36 @@ from gym_pybullet_drones.utils.utils import sync
 from inventory_logger import InventoryLogger
 from utils import capture_frame, setup_camera_and_recorder
 from warehouse_env import WarehouseAviary
+from warehouse_mapper import WarehouseMapper
 
 # Warehouse configuration
 WAREHOUSE_DIMS = (10.0, 14.0, 3.0)
 SHELF_DIMS = (0.5, 2.0, 2.0)
 AISLE_X_WIDTH = 2.0
 AISLE_Y_WIDTH = 2.0
-DETECTION_RANGE = 0.75
+DETECTION_RANGE = 1.0
 NUM_DRONES = 3
 
-# Generate starting positions in bottom left corner
 START_OFFSET = 0.5  # Distance between drones
 INITIAL_XYZS = np.array([
     [-4 + i * START_OFFSET, -6, 1.0] for i in range(NUM_DRONES)
 ])
 INITIAL_RPYS = np.array([[0, 0, 0] for _ in range(NUM_DRONES)])
 
+MAP_FILE = "warehouse_map_20241210_012302.pkl"
+
 def run_multi_drone_inspection():
+    with open(MAP_FILE, 'rb') as f:
+        map_data = pickle.load(f)
+
+    mapper = WarehouseMapper.load_from_file(MAP_FILE)
+    shelf_positions = mapper.extract_shelf_positions()
+    # for i, shelf in enumerate(shelf_positions):
+    #     pos = shelf['position']
+    #     dims = shelf['dimensions']
+    #     print(f"Shelf {i}: position={pos}, dimensions={dims}")
+    map_data['shelf_positions'] = shelf_positions
+    
     env = WarehouseAviary(
         drone_model=DroneModel.CF2X,
         num_drones=NUM_DRONES,
@@ -34,25 +48,24 @@ def run_multi_drone_inspection():
         physics=Physics.PYB,
         pyb_freq=240,
         ctrl_freq=240,
-        gui=True,
+        gui=False,
         warehouse_dims=WAREHOUSE_DIMS,
         shelf_dims=SHELF_DIMS,
         aisle_x_width=AISLE_X_WIDTH,
         aisle_y_width=AISLE_Y_WIDTH,
-        detection_range=DETECTION_RANGE
+        detection_range=DETECTION_RANGE,
+        map_data=map_data
     )
 
     logger = InventoryLogger()
     logger.log_initial_inventory(env.inventory_system.inventory)
 
-    # Generate paths including initial positioning
     start_positions = [pos for pos in INITIAL_XYZS]
     inspection_paths = env.path_planner.generate_inspection_paths(start_positions)
 
     for i in range(NUM_DRONES):
         print(f"Drone {i} path: {inspection_paths[i]}")
 
-    # Initialize controllers
     controllers = [DSLPIDControl(drone_model=DroneModel.CF2X) for _ in range(NUM_DRONES)]
     for ctrl in controllers:
         ctrl.P_COEFF_FOR = ctrl.P_COEFF_FOR * 0.5
@@ -67,9 +80,9 @@ def run_multi_drone_inspection():
     for i in range(NUM_DRONES):
         print(f"Drone {i} path length: {len(inspection_paths[i])} waypoints")
 
-    VIDEO_WIDTH = 640
-    VIDEO_HEIGHT = 480
-    video_writer = setup_camera_and_recorder(env, VIDEO_WIDTH, VIDEO_HEIGHT)    
+    # VIDEO_WIDTH = 640
+    # VIDEO_HEIGHT = 480
+    # video_writer = setup_camera_and_recorder(env, VIDEO_WIDTH, VIDEO_HEIGHT)    
 
     START = time.time()
     last_scan_time = time.time()
@@ -121,22 +134,29 @@ def run_multi_drone_inspection():
             
             obs, reward, terminated, truncated, info = env.step(action)
             
-            if i % 40 == 0:
-                capture_frame(env, video_writer, VIDEO_WIDTH, VIDEO_HEIGHT)
+            # if i % 40 == 0:
+            #     capture_frame(env, video_writer, VIDEO_WIDTH, VIDEO_HEIGHT)
 
             if i % 240 == 0:
                 env.render()
             
             sync(i, START, env.CTRL_TIMESTEP)
 
-        stats = logger.get_detection_stats()
-        print(f"\n=== Inspection Complete ===")
-        print(f"Total items detected: {stats['total_detected']}")
+            # Check if all drones have completed their paths
+            if all([waypoint_indices[i] == len(inspection_paths[i]) - 1 for i in range(NUM_DRONES)]):
+                break
+
+            # Check if items have been detected
+            stats = logger.get_detection_stats()
+            print(f"\r[INFO] Total items detected: {stats['total_detected']}/{len(env.inventory_system.inventory)}", end="")
+            if stats['total_detected'] == len(env.inventory_system.inventory):
+                print("\n[INFO] All items detected!")
+                break
         
     except KeyboardInterrupt:
         pass
     finally:
-        video_writer.release()
+        # video_writer.release()
         env.close()
 
 if __name__ == "__main__":
